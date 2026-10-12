@@ -1,0 +1,16 @@
+(library
+ (name binance_sim_anchor)
+ (public_name binance-sim-anchor)
+ (libraries
+  async
+  binance-client
+  binance-sim
+  core
+  core_unix.time_ns_unix
+  exchange-core
+  exchange-core-engine
+  market-data
+  price-anchor
+  yojson)
+ (preprocess
+  (pps ppx_jane)))
