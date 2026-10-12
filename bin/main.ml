@@ -38,6 +38,15 @@ let command =
             (Usd.to_string Server.Config.default.initial_balance)
             string)
          ~doc:"USDT balance credited to any API key on first use"
+     and anchors =
+       flag
+         "-anchor"
+         (listed Binance_sim_anchor.Spec.arg_type)
+         ~doc:
+           "VENUE:SYMBOL=SIM_SYMBOL follow a reference market, e.g. \
+            binance:BTCUSDT=BTCUSDT (repeatable; live unless -anchor-raw or \
+            -anchor-norm)"
+     and anchor_config = Binance_sim_anchor.Anchored.Config.param
      and log_level =
        flag
          "-log-level"
@@ -61,19 +70,31 @@ let command =
          "binance-sim listening on port %d (/fapi REST, /ws and /stream websockets)"
          (Server.port http);
        Server.start_periodic server;
-       if noise_traders > 0
-       then (
-         let sim =
-           Market_sim.create
-             { Market_sim.Config.default with
-               seed
-             ; vol_bps
-             ; noise_traders
-             ; symbols = List.map (Option.value symbols ~default:[]) ~f:Symbol.of_string
-             }
-             (Adapt.exchange adapt)
-         in
-         Server.run_market_sim server sim);
+       let market_sim =
+         if noise_traders <= 0
+         then None
+         else (
+           let sim =
+             Market_sim.create
+               { Market_sim.Config.default with
+                 seed
+               ; vol_bps
+               ; noise_traders
+               ; symbols = List.map (Option.value symbols ~default:[]) ~f:Symbol.of_string
+               }
+               (Adapt.exchange adapt)
+           in
+           Some sim)
+       in
+       let%bind anchors =
+         Deferred.List.map anchors ~how:`Sequential ~f:(fun spec ->
+           Binance_sim_anchor.Anchored.start ?market_sim server anchor_config spec
+           >>| Or_error.ok_exn)
+       in
+       (* After the anchors, so anchored symbols never see a noise trader tick. *)
+       Option.iter market_sim ~f:(Server.run_market_sim server);
+       Binance_sim_anchor.Anchored.serve_status server anchors;
+       Binance_sim_anchor.Anchored.log_status_every (Time_ns.Span.of_sec 30.) anchors;
        Cohttp_async.Server.close_finished http)
 ;;
 
