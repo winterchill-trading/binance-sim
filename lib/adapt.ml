@@ -488,6 +488,23 @@ let new_order t account (req : New_order.Request.t) =
     (match validate t spec req with
      | Error rejection -> reject ~symbol:spec.symbol rejection
      | Ok (neutral, info) ->
+       (* The engine clips a reduce-only order to the position; report the clipped size,
+          so that its fills add up to a FILLED order. *)
+       let info =
+         if not neutral.reduce_only
+         then info
+         else (
+           let reducible =
+             Clearinghouse.reduce_only_size
+               (Exchange.clearinghouse ex)
+               account
+               ~symbol:neutral.symbol
+               ~side:neutral.side
+           in
+           if Size.is_positive reducible
+           then { info with orig_qty = Size.min info.orig_qty reducible }
+           else info)
+       in
        let respond order_id status =
          Hashtbl.set t.orders ~key:order_id ~data:info;
          let executed, cum_quote = fills_total (taker_fills t account order_id) in
