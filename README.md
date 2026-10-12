@@ -25,6 +25,15 @@ dune exec binance-sim -- -port 3300
 | `-noise-traders` | 10 | noise trader accounts; 0 disables the market simulation |
 | `-initial-balance` | 1000000 | USDT credited to any API key on first use |
 | `-log-level` | info | `debug`, `info`, `warn` or `error` |
+| `-anchor VENUE:SYMBOL=SIM` | none | follow a reference market (repeatable), see [Anchoring](#anchoring-to-a-reference-market) |
+| `-anchor-levels` | 5 | reference levels resting per side |
+| `-anchor-mark-interval-ms` | 100 | minimum time between two mark price updates |
+| `-anchor-max-staleness-ms` | 5000 | a reference silent for longer is stale |
+| `-anchor-noise` | 0 | noise traders kept on anchored symbols |
+| `-anchor-price-factor`, `-anchor-size-factor` | 1 | simulated price and size per reference unit |
+| `-anchor-raw DIR`, `-anchor-norm DIR` | live | recorded source: raw minute files or event logs |
+| `-anchor-from T`, `-anchor-to T` | | recorded range: ISO 8601 time with zone, or a UTC date (a whole day) |
+| `-anchor-speed` | 1 | recorded pace: 1 real time, 0 as fast as websocket clients read |
 
 Logs go to stderr: fills and liquidations at `info`; every event, request and websocket
 request at `debug`.
@@ -150,6 +159,78 @@ idle book sends nothing, so a snapshot taken while idle has no event satisfying 
 rule until the next change, whose `U` is `lastUpdateId + 1`; strict clients fetch the
 snapshot again then.
 
+## Anchoring to a reference market
+
+`-anchor binance:BTCUSDT=BTCUSDT` ties the simulated BTCUSDT to Binance's real one through
+[price-anchor](https://github.com/winterchill-trading/price-anchor): the mark price and
+funding rate follow the reference, the reference's top levels rest in the simulated book
+(account `anchor:binance:BTCUSDT`), and simulated resting orders fill when the reference
+trades at or through them (IOC orders from `anchor-taker:binance:BTCUSDT`). Clients see
+the reference book, trades and marks on the usual REST endpoints and streams. Anchored
+symbols get no noise traders unless `-anchor-noise N`; the other symbols keep theirs.
+Everything goes through the engine's journaled calls, so the run replays without the
+reference data.
+
+```sh
+# Live, from Binance mainnet's public streams (no keys)
+dune exec binance-sim -- -anchor binance:BTCUSDT=BTCUSDT -anchor binance:ETHUSDT=ETHUSDT
+
+# A recorded hour of market-recorder raw minute files, at real time
+dune exec binance-sim -- -anchor binance:BTCUSDT=BTCUSDT \
+  -anchor-raw /data/recorder -anchor-from 2026-10-12T09:00:00Z -anchor-to 2026-10-12T10:00:00Z
+
+# A recorded day of normalized event logs, as fast as websocket clients read
+dune exec binance-sim -- -anchor binance:BTCUSDT=BTCUSDT \
+  -anchor-norm /data/recorder/norm -anchor-from 2026-10-12 -anchor-to 2026-10-12 -anchor-speed 0
+
+curl -s localhost:3300/sim/anchor
+```
+
+- **Sources.** Live uses binance-client's `Live_feed` (aggTrade, diff depth with REST
+  snapshots, markPrice@1s). `-anchor-raw DIR` reads the recorder's data directory
+  (`DIR/raw/binance/...`) through binance-client's `Raw_normalizer`; a recorded disconnect
+  makes the anchor stale until the next snapshot. `-anchor-norm DIR` reads `Event_log`
+  files of the UTC days the range covers. Only Binance references are linked so far.
+- **Time.** The anchor runs on the Async scheduler thread: each reference item is applied,
+  then its engine events are published, and every clock step of the server (each request,
+  the 1 s timer) calls `Anchor.step` after stepping the exchange. With a recorded source
+  the server's clock runs at `-anchor-speed` times the wall clock (frozen at 0, where only
+  the reference's `recv_ts` moves time), so funding, staleness and timestamps stay in
+  recorded time. Timestamps of a slowed replay fall behind the wall clock; clients that
+  check data age need a larger limit (the demo raises market-maker's `max_data_age_ms`).
+- **Status.** `GET /sim/anchor` returns one object per anchor: `state` (`fresh` or
+  `stale`), `stale_reason`, `stale_seconds` (simulated time spent stale), `went_stale`,
+  `gaps`, `events`, `marks_set`, `funding_rates_set`, `reference_price`,
+  `shadow_levels_resting`, `shadow` (placed, cancelled, skipped, consumed),
+  `replay_fills`, `replays_rejected` and `source_finished`. Fresh/stale transitions are
+  logged at `info` as they happen, and an `anchor status` line every 30 s.
+
+```json
+[{"reference":"binance:BTCUSDT","sim_symbol":"BTCUSDT","source":"live","state":"fresh",
+  "stale_reason":null,"stale_seconds":1.16,"went_stale":1,"gaps":0,"events":105,
+  "ignored":0,"marks_set":6,"funding_rates_set":1,"reference_price":"82912.3",
+  "shadow_levels_resting":10,"shadow":{"placed":142,"cancelled":132,"skipped":0,
+  "consumed":0},"replay_fills":0,"replays_rejected":0,"source_finished":false}]
+```
+
+`scripts/anchor-demo.sh [SECONDS]` runs the simulator anchored to the recorded BTCUSDT
+minute in `anchor/test/fixtures` (about 6.5 s of trading, slowed to a quarter), connects
+market-maker to it, and prints once a second the reference price, the simulated best bid
+and ask, and the maker's best quotes. `LIVE=1` anchors to mainnet instead. A run:
+
+```
+time     state  reference   sim bid / ask           maker bid / ask         replay fills
++0s      fresh  82613.6     82613.5 / 82613.6       82588.8 / 82638.4       0
++9s      fresh  82620.2     82613.5 / 82613.6       82588.8 / 82638.4       0
++10s     fresh  82620.2     82619.3 / 82619.4       82588.8 / 82638.4       0
++11s     fresh  82620.2     82628.8 / 82628.9       82604 / 82654.9         0
++14s     fresh  82628.9     82635.1 / 82635.2       82604 / 82654.9         0
++17s     fresh  82635.2     82625.1 / 82625.2       82604 / 82654.9         0
+```
+
+The reference price is the venue's mark (from markPrice@1s), so it can differ from the
+book's mid by a few ticks.
+
 ## Differences from Binance
 
 - **Auth**: no signature or `recvWindow` checks, no rate limits, no IP or key bans.
@@ -174,10 +255,11 @@ snapshot again then.
 - **Reduce-only** orders are clipped to the position size, and reported with the clipped
   `origQty`.
 - **`PRICE_FILTER` min/max and `PERCENT_PRICE`** are published but not enforced.
-- **Prices**: the index price equals the mark price; the mark is the engine's (market
-  sim reference price when it runs, else last trade, else mid, else `0`). Funding uses
-  the configured rate (not a premium index); `ACCOUNT_UPDATE` with `FUNDING_FEE` reports
-  it.
+- **Prices**: the index price equals the mark price; the mark is the engine's (the
+  anchor's reference price on anchored symbols, the market sim reference price when it
+  runs, else last trade, else mid, else `0`). Funding uses the configured rate (the
+  reference's, converted to 8 hours, on anchored symbols), not a premium index;
+  `ACCOUNT_UPDATE` with `FUNDING_FEE` reports it.
 - **`ACCOUNT_UPDATE`** carries the account's balances and position as of the end of the
   request that produced the fill, not as of each fill.
 - **`aggTrade`** has one trade per aggregate (`a`, `f` and `l` are the trade id).
@@ -188,18 +270,25 @@ snapshot again then.
 
 ```sh
 opam switch create 5.2.0+ox --repos ox=git+https://github.com/oxcaml/opam-repository.git,default
-opam pin add fixed-decimal https://github.com/winterchill-trading/fixed-decimal.git --no-action
-opam pin add exchange-core https://github.com/winterchill-trading/exchange-core.git --no-action
-opam pin add binance-protocol https://github.com/winterchill-trading/binance-protocol.git --no-action
-opam pin add order-book https://github.com/winterchill-trading/order-book.git --no-action
+for repo in fixed-decimal exchange-core parquet market-data order-book; do
+  opam pin add $repo https://github.com/winterchill-trading/$repo.git --no-action
+done
 opam pin add exchange-core-engine https://github.com/winterchill-trading/exchange-core.git --no-action
+for repo in venue-net binance-protocol mm-core price-anchor binance-client; do
+  opam pin add $repo https://github.com/winterchill-trading/$repo.git --no-action
+done
 opam install . --deps-only --with-test
 dune build && dune test
 ```
 
-Inside a dune workspace that also contains `fixed-decimal`, `exchange-core`,
-`order-book` and `binance-protocol`, dune uses the sibling sources and the pins are not
-needed.
+Inside a dune workspace that also contains the siblings, dune uses their sources and the
+pins are not needed.
+
+The repository has two opam packages. `binance-sim` is the library (`Adapt`, `Params`,
+`Server`) and depends on neither price-anchor nor binance-client, because binance-client's
+tests run against it. `binance-sim-anchor` holds the `Binance_sim_anchor` library (the
+`-anchor` flags and sources) and the `binance-sim` binary, which links binance-client for
+the live feed and the raw-file normalizer.
 
 CI installs the pinned siblings and the opam dependencies through the shared
 [ox-setup](https://github.com/winterchill-trading/infra/blob/main/docs/ci.md) action, which
@@ -215,7 +304,15 @@ the [exchange-core README](https://github.com/winterchill-trading/exchange-core)
 | --- | --- |
 | `Adapt` | Binance view of the engine: universe and trading rules, order validation with Binance error codes, order objects, `User_trade`, `Account` (v2), `Position_risk`, `Depth`, `Book_ticker`, `Premium_index`, `Exchange_info`, stream payloads, and the per-order state behind `ORDER_TRADE_UPDATE` |
 | `Params` | Query-string and form parameters to `New_order.Request`, `Cancel_order.Request` and batch items, with Binance's parameter errors |
-| `Server` | cohttp-async server for `/fapi` and the `/ws` and `/stream` websockets (async_websocket); owns the engine, depth sequencing, listen keys and the market simulation timer |
+| `Server` | cohttp-async server for `/fapi` and the `/ws` and `/stream` websockets (async_websocket); owns the engine, depth sequencing, listen keys and the market simulation timer; clock step hooks, extra `GET` routes and websocket `pushback` for the anchor |
+
+`Binance_sim_anchor` (package `binance-sim-anchor`):
+
+| Module | Description |
+| --- | --- |
+| `Spec` | an `-anchor VENUE:SYMBOL=SIM` value |
+| `Reference` | live (`Live_feed`), raw (`Raw_normalizer`) and norm reference sources as `Price_anchor.Source.t`, and the `-anchor-from`/`-anchor-to` time syntax |
+| `Anchored` | the anchor flags, the server clock for a replay speed, running an anchor on the server (step hook, apply then publish, client-paced replay at speed 0), `GET /sim/anchor` and the periodic status line |
 
 All exchange access happens on the Async scheduler thread, so there is no locking.
 Before each request the exchange clock is stepped to the wall clock (funding and
@@ -229,3 +326,10 @@ reduce-only, self-trade prevention, funding), a seeded market simulation on the 
 universe, and the HTTP and websocket server on a free port with a fixed clock (market
 data, orders, cancels, account views, rejections, batch orders, stream subscriptions with
 depth sequencing, the user data stream and ping frames).
+
+`anchor/test` checks the anchor flags and the server clock per replay speed, a live anchor
+to a second binance-sim on a local port (the reference book rests in the anchored book, a
+reference trade fills a client order it trades through, the journal replays the run), and
+a recorded Binance minute (`anchor/test/fixtures`, copied from binance-client's fixtures
+as raw minute files): two trade-replay fills of a client order, a journal replay that
+matches, and the same run from event logs rebuilt from those files.
