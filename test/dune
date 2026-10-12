@@ -1,0 +1,20 @@
+(library
+ (name binance_sim_test)
+ (inline_tests
+  (flags
+   (:standard -source-tree-root .)))
+ (libraries
+  async
+  async_websocket
+  binance-protocol
+  binance-sim
+  cohttp
+  cohttp-async
+  core
+  exchange-core
+  exchange-core-engine
+  order-book
+  uri
+  yojson)
+ (preprocess
+  (pps ppx_jane)))
