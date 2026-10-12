@@ -158,8 +158,8 @@ val depth_of_l2
 val book_ticker : t -> Symbol.t -> Book_ticker.t option
 
 (** Mark price (the engine's: last [set_mark], else last trade, else mid; ["0"] when the
-    book has never traded), index price equal to the mark, the last funding rate charged
-    (or the configured rate) and the next 8-hour boundary. *)
+    book has never traded), index price equal to the mark, the funding rate of the next
+    8-hour boundary (the engine's [funding_rate]) and that boundary. *)
 val premium_index : t -> Symbol.t -> Premium_index.t option
 
 val exchange_info : t -> Exchange_info.t
@@ -200,9 +200,8 @@ val partial_depth
     [EXPIRED] for IOC remainders and [EXPIRED_IN_MATCH] for self-trade prevention) and
     [ACCOUNT_UPDATE] (reason [ORDER] after fills and liquidations, [FUNDING_FEE] after
     funding). Rejections produce nothing. Must be called once per event, in order: it
-    updates the per-order fill state and the last funding rates. Events are only built for
-    accounts satisfying [interested] (default: all), e.g. those with an open user data
-    stream. *)
+    updates the per-order fill state. Events are only built for accounts satisfying
+    [interested] (default: all), e.g. those with an open user data stream. *)
 val user_events
   :  ?interested:(Account_id.t -> bool)
   -> t

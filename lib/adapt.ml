@@ -184,7 +184,6 @@ type t =
   { exchange : Exchange.t
   ; universe : Spec.t list
   ; orders : Order_info.t Order_id.Table.t
-  ; funding_rates : float Symbol.Table.t
   ; mutable next_client_id : int
   }
 
@@ -194,12 +193,7 @@ let create ?(universe = Spec.default_universe) ?exchange () =
     | Some ex -> ex
     | None -> Exchange.create ~config:(config ~universe ()) ()
   in
-  { exchange
-  ; universe
-  ; orders = Order_id.Table.create ()
-  ; funding_rates = Symbol.Table.create ()
-  ; next_client_id = 1
-  }
+  { exchange; universe; orders = Order_id.Table.create (); next_client_id = 1 }
 ;;
 
 let exchange t = t.exchange
@@ -804,11 +798,6 @@ let book_ticker t symbol =
     { symbol; bid_price; bid_qty; ask_price; ask_qty; time = now_ms t })
 ;;
 
-let funding_rate t symbol =
-  Hashtbl.find t.funding_rates symbol
-  |> Option.value ~default:(Exchange.config t.exchange).default_funding_rate
-;;
-
 let next_funding_time t =
   let interval = (Exchange.config t.exchange).funding_interval_ns in
   ms (((Exchange.now t.exchange / interval) + 1) * interval)
@@ -821,7 +810,7 @@ let premium_index t symbol =
     ; mark_price = mark
     ; index_price = mark
     ; estimated_settle_price = Some mark
-    ; last_funding_rate = Decimal.of_float (funding_rate t spec.symbol)
+    ; last_funding_rate = Decimal.of_float (Exchange.funding_rate t.exchange spec.symbol)
     ; interest_rate = Some (Decimal.of_string "0.0001")
     ; next_funding_time = next_funding_time t
     ; time = now_ms t
@@ -1202,8 +1191,7 @@ let user_events ?(interested = fun _ -> true) t (event : Event.t) =
             ~balance_change:Usd.zero
             ~time
         ])
-  | Funding { symbol; rate; payments; time; mark = _ } ->
-    Hashtbl.set t.funding_rates ~key:symbol ~data:rate;
+  | Funding { payments; time; _ } ->
     List.concat_map payments ~f:(fun p ->
       for_account
         p.account
