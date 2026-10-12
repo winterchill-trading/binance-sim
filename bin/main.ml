@@ -70,7 +70,6 @@ let command =
              ; vol_bps
              ; noise_traders
              ; symbols = List.map (Option.value symbols ~default:[]) ~f:Symbol.of_string
-             ; initial_prices = Adapt.initial_prices
              }
              (Adapt.exchange adapt)
          in

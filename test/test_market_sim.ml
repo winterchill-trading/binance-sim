@@ -9,13 +9,7 @@ let run ~seed ~ticks =
   let adapt = Adapt.create () in
   let exchange = Adapt.exchange adapt in
   let sim =
-    Market_sim.create
-      { Market_sim.Config.default with
-        seed
-      ; noise_traders = 4
-      ; initial_prices = Adapt.initial_prices
-      }
-      exchange
+    Market_sim.create { Market_sim.Config.default with seed; noise_traders = 4 } exchange
   in
   let counts = String.Table.create () in
   for i = 1 to ticks do
