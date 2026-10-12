@@ -201,6 +201,10 @@ Inside a dune workspace that also contains `fixed-decimal`, `exchange-core`,
 `order-book` and `binance-protocol`, dune uses the sibling sources and the pins are not
 needed.
 
+CI installs the pinned siblings and the opam dependencies through the shared
+[ox-setup](https://github.com/winterchill-trading/infra/blob/main/docs/ci.md) action, which
+caches the built opam switch between runs.
+
 ## Modules
 
 All modules live under `Binance_sim`. The engine (`Exchange`, `Clearinghouse`, `Event`,
