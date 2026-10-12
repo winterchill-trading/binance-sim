@@ -1,0 +1,16 @@
+; The main module is [main] rather than [binance_sim] so that it does not clash with
+; the [binance_sim] library's wrapper module.
+
+(executable
+ (name main)
+ (public_name binance-sim)
+ (libraries
+  async
+  binance-protocol
+  binance-sim
+  core
+  core_unix.command_unix
+  exchange-core
+  exchange-core-engine)
+ (preprocess
+  (pps ppx_jane)))
