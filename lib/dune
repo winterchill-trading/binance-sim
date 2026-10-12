@@ -1,0 +1,21 @@
+(library
+ (name binance_sim)
+ (public_name binance-sim)
+ (libraries
+  async
+  async_websocket
+  binance-protocol
+  cohttp
+  cohttp-async
+  core
+  core_unix
+  exchange-core
+  exchange-core-engine
+  fixed-decimal
+  http
+  order-book
+  ppx_yojson_conv_lib
+  uri
+  yojson)
+ (preprocess
+  (pps ppx_jane)))
