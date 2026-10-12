@@ -59,6 +59,7 @@ let command =
        let adapt = Adapt.create () in
        let server =
          Server.create
+           ~now:(Binance_sim_anchor.Anchored.Config.server_clock anchor_config)
            ~config:
              { Server.Config.default with
                initial_balance = Usd.of_string initial_balance

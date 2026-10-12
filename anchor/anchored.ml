@@ -31,6 +31,19 @@ module Config = struct
     }
   ;;
 
+  let wall_ns () = Time_ns.to_int_ns_since_epoch (Time_ns.now ())
+
+  let server_clock t =
+    let start = wall_ns () in
+    match t.source with
+    | Live -> wall_ns
+    | (Raw _ | Norm _) when Float.equal t.speed 1. -> wall_ns
+    | (Raw _ | Norm _) when Float.equal t.speed 0. -> fun () -> start
+    | Raw _ | Norm _ ->
+      fun () ->
+        start + Float.iround_nearest_exn (Float.of_int (wall_ns () - start) *. t.speed)
+  ;;
+
   let time which =
     Command.Arg_type.create (fun s -> Or_error.ok_exn (Reference.parse_time which s))
   ;;

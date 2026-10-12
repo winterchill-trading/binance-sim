@@ -29,6 +29,16 @@ module Config : sig
   (** Live, the anchor's defaults, speed 1. *)
   val default : t
 
+  (** The clock the server should step the exchange with ({!Binance_sim.Server.create}'s
+      [now]), so that simulated time runs at the pace the reference is replayed at and the
+      anchor's staleness and funding stay in recorded time:
+      - live sources and [speed = 1.]: the wall clock;
+      - recorded sources with [speed > 0.]: the wall clock scaled by [speed] from the
+        moment [server_clock] is called;
+      - recorded sources with [speed = 0.]: the wall clock frozen when [server_clock] is
+        called, so simulated time moves only with the reference's [recv_ts]. *)
+  val server_clock : t -> unit -> int
+
   (** [-anchor-levels], [-anchor-mark-interval-ms], [-anchor-max-staleness-ms],
       [-anchor-noise], [-anchor-price-factor], [-anchor-size-factor], [-anchor-raw],
       [-anchor-norm], [-anchor-from], [-anchor-to], [-anchor-speed]. *)
