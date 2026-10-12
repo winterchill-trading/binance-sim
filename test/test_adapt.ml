@@ -107,7 +107,7 @@ let%expect_test "IOC remainder expires, FOK fills or is rejected, reduce-only" =
     error -5021 Due to the order could not be filled immediately, the FOK order has been rejected. The order will not be recorded in the order history
     order 4 sim-3 FILLED qty=0.01 executed=0.01 avg=100100
     error -2022 ReduceOnly Order is rejected.
-    order 5 sim-5 NEW qty=0.01 executed=0 avg=0
+    order 6 sim-5 NEW qty=0.01 executed=0 avg=0
     |}];
   print_events adapt;
   [%expect
@@ -117,7 +117,7 @@ let%expect_test "IOC remainder expires, FOK fills or is rejected, reduce-only" =
     key-3 ACCOUNT_UPDATE ORDER wb=99999.4995 BTCUSDT:0.01@100100
     key-1 ORDER_TRADE_UPDATE i=2 c=sim-1 x=TRADE X=FILLED l=0.01 z=0.01 ap=100100 n=0.2002 rp=0
     key-1 ACCOUNT_UPDATE ORDER wb=99999.5998 BTCUSDT:-0.02@100050
-    key-2 ORDER_TRADE_UPDATE i=5 c=sim-5 x=NEW X=NEW l=0 z=0 ap=0 n=- rp=0
+    key-2 ORDER_TRADE_UPDATE i=6 c=sim-5 x=NEW X=NEW l=0 z=0 ap=0 n=- rp=0
     |}]
 ;;
 

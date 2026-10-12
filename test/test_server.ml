@@ -287,7 +287,7 @@ let%expect_test "order rejections and batch orders" =
       |> ignore_body
     in
     [%expect
-      {| 200 [{"orderId":2,"symbol":"BTCUSDT","clientOrderId":"sim-3","side":"SELL","positionSide":"BOTH","status":"NEW","type":"LIMIT","origType":"LIMIT","timeInForce":"GTC","price":"101000","origQty":"0.01","executedQty":"0","cumQty":"0","cumQuote":"0","avgPrice":"0","stopPrice":"0","reduceOnly":false,"closePosition":false,"priceProtect":false,"workingType":"CONTRACT_PRICE","priceMatch":"NONE","selfTradePreventionMode":"EXPIRE_TAKER","goodTillDate":0,"updateTime":1700000000000},{"code":-4014,"msg":"Price not increased by tick size."}] |}];
+      {| 200 [{"orderId":3,"symbol":"BTCUSDT","clientOrderId":"sim-3","side":"SELL","positionSide":"BOTH","status":"NEW","type":"LIMIT","origType":"LIMIT","timeInForce":"GTC","price":"101000","origQty":"0.01","executedQty":"0","cumQty":"0","cumQuote":"0","avgPrice":"0","stopPrice":"0","reduceOnly":false,"closePosition":false,"priceProtect":false,"workingType":"CONTRACT_PRICE","priceMatch":"NONE","selfTradePreventionMode":"EXPIRE_TAKER","goodTillDate":0,"updateTime":1700000000000},{"code":-4014,"msg":"Price not increased by tick size."}] |}];
     let%bind () =
       call ~key:mm `DELETE port "/fapi/v1/allOpenOrders?symbol=BTCUSDT&timestamp=1"
       |> ignore_body

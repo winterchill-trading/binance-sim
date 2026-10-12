@@ -61,20 +61,20 @@ let%expect_test "noise traders keep two-sided books on the Binance universe" =
        : (string * int) list)];
   [%expect
     {|
-    ((symbol BTCUSDT) (reference (100133.1))
-     (best_bid (((price 100138.6) (qty 0.01))))
-     (best_ask (((price 100259.6) (qty 0.011)))))
-    ((symbol ETHUSDT) (reference (3496.59))
-     (best_bid (((price 3495.97) (qty 0.053))))
-     (best_ask (((price 3497.09) (qty 0.197)))))
-    ((symbol SOLUSDT) (reference (150.06)) (best_bid (((price 149.99) (qty 8))))
-     (best_ask (((price 150.11) (qty 11)))))
-    ((ACCOUNT_UPDATE 178) ("ORDER_TRADE_UPDATE CANCELED/CANCELED" 584)
+    ((symbol BTCUSDT) (reference (99798.5))
+     (best_bid (((price 99764.9) (qty 0.019))))
+     (best_ask (((price 99853.3) (qty 0.063)))))
+    ((symbol ETHUSDT) (reference (3510.73))
+     (best_bid (((price 3507.9) (qty 0.427))))
+     (best_ask (((price 3509.21) (qty 0.026)))))
+    ((symbol SOLUSDT) (reference (150.15)) (best_bid (((price 150.17) (qty 49))))
+     (best_ask (((price 150.25) (qty 33)))))
+    ((ACCOUNT_UPDATE 132) ("ORDER_TRADE_UPDATE CANCELED/CANCELED" 631)
      ("ORDER_TRADE_UPDATE EXPIRED/EXPIRED_IN_MATCH" 7)
-     ("ORDER_TRADE_UPDATE NEW/NEW" 785) ("ORDER_TRADE_UPDATE TRADE/FILLED" 134)
-     ("ORDER_TRADE_UPDATE TRADE/PARTIALLY_FILLED" 44)
+     ("ORDER_TRADE_UPDATE NEW/NEW" 791) ("ORDER_TRADE_UPDATE TRADE/FILLED" 97)
+     ("ORDER_TRADE_UPDATE TRADE/PARTIALLY_FILLED" 35)
      ("rejected: Order would immediately match against an order of the same account."
-      14)
+      13)
      ("rejected: Unable to fill." 2))
     |}]
 ;;
