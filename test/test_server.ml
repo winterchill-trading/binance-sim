@@ -302,3 +302,217 @@ let%expect_test "order rejections and batch orders" =
       |}];
     return ())
 ;;
+
+(* Websocket *)
+
+let ws_connect port path =
+  let%bind _socket, reader, writer =
+    Tcp.connect (Tcp.Where_to_connect.of_host_and_port { host = "127.0.0.1"; port })
+  in
+  Writer.write
+    writer
+    (sprintf
+       "GET %s HTTP/1.1\r\n\
+        Host: localhost\r\n\
+        Upgrade: websocket\r\n\
+        Connection: Upgrade\r\n\
+        Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n\
+        Sec-WebSocket-Version: 13\r\n\
+        \r\n"
+       path);
+  let rec read_headers () =
+    match%bind Reader.read_line reader with
+    | `Eof -> failwith "eof during handshake"
+    | `Ok "" -> return ()
+    | `Ok line ->
+      if String.is_prefix line ~prefix:"HTTP/" then print_endline line;
+      read_headers ()
+  in
+  let%map () = read_headers () in
+  let ws = Websocket.create ~opcode:`Text ~role:Client reader writer in
+  let incoming, outgoing = Websocket.pipes ws in
+  ws, incoming, outgoing
+;;
+
+let receive incoming =
+  match%map Pipe.read incoming with
+  | `Ok msg -> print_endline msg
+  | `Eof -> print_endline "<eof>"
+;;
+
+let%expect_test "market streams: subscribe, depth sequencing, bookTicker, aggTrade" =
+  with_server (fun port ->
+    let%bind _ws, incoming, outgoing = ws_connect port "/stream" in
+    [%expect {| HTTP/1.1 101 Switching Protocols |}];
+    Pipe.write_without_pushback
+      outgoing
+      {|{"method":"SUBSCRIBE","params":["btcusdt@depth@100ms","btcusdt@bookTicker","btcusdt@aggTrade","btcusdt@depth5"],"id":1}|};
+    let%bind () = receive incoming in
+    Pipe.write_without_pushback outgoing {|{"method":"LIST_SUBSCRIPTIONS","id":2}|};
+    let%bind () = receive incoming in
+    Pipe.write_without_pushback outgoing {|{"method":"SUBSCRIBE","id":"x"}|};
+    let%bind () = receive incoming in
+    Pipe.write_without_pushback outgoing "nope";
+    let%bind () = receive incoming in
+    [%expect
+      {|
+      {"result":null,"id":1}
+      {"result":["btcusdt@aggTrade","btcusdt@bookTicker","btcusdt@depth5","btcusdt@depth@100ms"],"id":2}
+      {"code":2,"msg":"Invalid request"}
+      {"code":3,"msg":"Invalid JSON: Line 1, bytes 0-4:\nInvalid token 'nope'"}
+      |}];
+    let%bind () = get port "/fapi/v1/depth?symbol=BTCUSDT&limit=5" |> ignore_body in
+    [%expect
+      {| 200 {"lastUpdateId":0,"E":1700000000000,"T":1700000000000,"bids":[],"asks":[]} |}];
+    let%bind () =
+      order
+        port
+        ~key:mm
+        ~side:"SELL"
+        ~type_:"LIMIT"
+        ~tif:"GTC"
+        ~price:"100000"
+        ~qty:"0.01"
+      >>= fun () ->
+      order port ~key:mm ~side:"BUY" ~type_:"LIMIT" ~tif:"GTC" ~price:"99000" ~qty:"0.01"
+    in
+    [%expect
+      {|
+      200 {"orderId":1,"symbol":"BTCUSDT","clientOrderId":"sim-1","side":"SELL","positionSide":"BOTH","status":"NEW","type":"LIMIT","origType":"LIMIT","timeInForce":"GTC","price":"100000","origQty":"0.01","executedQty":"0","cumQty":"0","cumQuote":"0","avgPrice":"0","stopPrice":"0","reduceOnly":false,"closePosition":false,"priceProtect":false,"workingType":"CONTRACT_PRICE","priceMatch":"NONE","selfTradePreventionMode":"EXPIRE_TAKER","goodTillDate":0,"updateTime":1700000000000}
+      200 {"orderId":2,"symbol":"BTCUSDT","clientOrderId":"sim-2","side":"BUY","positionSide":"BOTH","status":"NEW","type":"LIMIT","origType":"LIMIT","timeInForce":"GTC","price":"99000","origQty":"0.01","executedQty":"0","cumQty":"0","cumQuote":"0","avgPrice":"0","stopPrice":"0","reduceOnly":false,"closePosition":false,"priceProtect":false,"workingType":"CONTRACT_PRICE","priceMatch":"NONE","selfTradePreventionMode":"EXPIRE_TAKER","goodTillDate":0,"updateTime":1700000000000}
+      |}];
+    (* bookTicker is pushed at once; diff and partial depth after the 100ms flush. *)
+    let%bind () = receive incoming in
+    let%bind () = receive incoming in
+    let%bind () = receive incoming in
+    let%bind () = receive incoming in
+    [%expect
+      {|
+      {"stream":"btcusdt@bookTicker","data":{"e":"bookTicker","u":1,"E":1700000000000,"T":1700000000000,"s":"BTCUSDT","b":"0","B":"0","a":"100000","A":"0.01"}}
+      {"stream":"btcusdt@bookTicker","data":{"e":"bookTicker","u":2,"E":1700000000000,"T":1700000000000,"s":"BTCUSDT","b":"99000","B":"0.01","a":"100000","A":"0.01"}}
+      {"stream":"btcusdt@depth@100ms","data":{"e":"depthUpdate","E":1700000000000,"T":1700000000000,"s":"BTCUSDT","U":1,"u":2,"pu":0,"b":[["99000","0.01"]],"a":[["100000","0.01"]]}}
+      {"stream":"btcusdt@depth5","data":{"e":"depthUpdate","E":1700000000000,"T":1700000000000,"s":"BTCUSDT","U":1,"u":2,"pu":0,"b":[["99000","0.01"]],"a":[["100000","0.01"]]}}
+      |}];
+    let%bind () = get port "/fapi/v1/depth?symbol=BTCUSDT&limit=5" |> ignore_body in
+    [%expect
+      {| 200 {"lastUpdateId":2,"E":1700000000000,"T":1700000000000,"bids":[["99000","0.01"]],"asks":[["100000","0.01"]]} |}];
+    let%bind () =
+      order port ~key:taker ~side:"BUY" ~type_:"MARKET" ~qty:"0.004" |> Deferred.ignore_m
+    in
+    [%expect
+      {| 200 {"orderId":3,"symbol":"BTCUSDT","clientOrderId":"sim-3","side":"BUY","positionSide":"BOTH","status":"FILLED","type":"MARKET","origType":"MARKET","timeInForce":"GTC","price":"0","origQty":"0.004","executedQty":"0.004","cumQty":"0.004","cumQuote":"400","avgPrice":"100000","stopPrice":"0","reduceOnly":false,"closePosition":false,"priceProtect":false,"workingType":"CONTRACT_PRICE","priceMatch":"NONE","selfTradePreventionMode":"EXPIRE_TAKER","goodTillDate":0,"updateTime":1700000000000} |}];
+    let%bind () = receive incoming in
+    let%bind () = receive incoming in
+    let%bind () = receive incoming in
+    let%bind () = receive incoming in
+    [%expect
+      {|
+      {"stream":"btcusdt@aggTrade","data":{"e":"aggTrade","E":1700000000000,"s":"BTCUSDT","a":1,"p":"100000","q":"0.004","f":1,"l":1,"T":1700000000000,"m":false}}
+      {"stream":"btcusdt@bookTicker","data":{"e":"bookTicker","u":3,"E":1700000000000,"T":1700000000000,"s":"BTCUSDT","b":"99000","B":"0.01","a":"100000","A":"0.006"}}
+      {"stream":"btcusdt@depth@100ms","data":{"e":"depthUpdate","E":1700000000000,"T":1700000000000,"s":"BTCUSDT","U":3,"u":3,"pu":2,"b":[],"a":[["100000","0.006"]]}}
+      {"stream":"btcusdt@depth5","data":{"e":"depthUpdate","E":1700000000000,"T":1700000000000,"s":"BTCUSDT","U":3,"u":3,"pu":2,"b":[["99000","0.01"]],"a":[["100000","0.006"]]}}
+      |}];
+    Pipe.close outgoing;
+    return ())
+;;
+
+let%expect_test "user data stream" =
+  with_server (fun port ->
+    let%bind () = call ~key:taker `POST port "/fapi/v1/listenKey" |> ignore_body in
+    [%expect
+      {| 200 {"listenKey":"dfa113bc901bfb258834db686b53728a26b88dde8d3bfc1ad6a85e26603ebf05"} |}];
+    let%bind body = call ~quiet:true ~key:taker `PUT port "/fapi/v1/listenKey" in
+    let { Listen_key.listen_key } =
+      Listen_key.t_of_yojson (Yojson.Safe.from_string body)
+    in
+    let%bind _ws, incoming, outgoing = ws_connect port ("/ws/" ^ listen_key) in
+    [%expect {| HTTP/1.1 101 Switching Protocols |}];
+    let%bind () =
+      order
+        port
+        ~key:mm
+        ~side:"SELL"
+        ~type_:"LIMIT"
+        ~tif:"GTC"
+        ~price:"100000"
+        ~qty:"0.01"
+    in
+    let%bind () =
+      order
+        port
+        ~key:taker
+        ~side:"BUY"
+        ~type_:"LIMIT"
+        ~tif:"GTC"
+        ~price:"100000"
+        ~qty:"0.02"
+    in
+    [%expect
+      {|
+      200 {"orderId":1,"symbol":"BTCUSDT","clientOrderId":"sim-1","side":"SELL","positionSide":"BOTH","status":"NEW","type":"LIMIT","origType":"LIMIT","timeInForce":"GTC","price":"100000","origQty":"0.01","executedQty":"0","cumQty":"0","cumQuote":"0","avgPrice":"0","stopPrice":"0","reduceOnly":false,"closePosition":false,"priceProtect":false,"workingType":"CONTRACT_PRICE","priceMatch":"NONE","selfTradePreventionMode":"EXPIRE_TAKER","goodTillDate":0,"updateTime":1700000000000}
+      200 {"orderId":2,"symbol":"BTCUSDT","clientOrderId":"sim-2","side":"BUY","positionSide":"BOTH","status":"PARTIALLY_FILLED","type":"LIMIT","origType":"LIMIT","timeInForce":"GTC","price":"100000","origQty":"0.02","executedQty":"0.01","cumQty":"0.01","cumQuote":"1000","avgPrice":"100000","stopPrice":"0","reduceOnly":false,"closePosition":false,"priceProtect":false,"workingType":"CONTRACT_PRICE","priceMatch":"NONE","selfTradePreventionMode":"EXPIRE_TAKER","goodTillDate":0,"updateTime":1700000000000}
+      |}];
+    let%bind () = receive incoming in
+    let%bind () = receive incoming in
+    let%bind () = receive incoming in
+    [%expect
+      {|
+      {"e":"ORDER_TRADE_UPDATE","E":1700000000000,"T":1700000000000,"o":{"s":"BTCUSDT","c":"sim-2","S":"BUY","o":"LIMIT","f":"GTC","q":"0.02","p":"100000","ap":"0","sp":"0","x":"NEW","X":"NEW","i":2,"l":"0","z":"0","L":"0","T":1700000000000,"t":0,"m":false,"R":false,"wt":"CONTRACT_PRICE","ot":"LIMIT","ps":"BOTH","cp":false,"pP":false,"rp":"0","V":"EXPIRE_TAKER","pm":"NONE","gtd":0}}
+      {"e":"ORDER_TRADE_UPDATE","E":1700000000000,"T":1700000000000,"o":{"s":"BTCUSDT","c":"sim-2","S":"BUY","o":"LIMIT","f":"GTC","q":"0.02","p":"100000","ap":"100000","sp":"0","x":"TRADE","X":"PARTIALLY_FILLED","i":2,"l":"0.01","z":"0.01","L":"100000","N":"USDT","n":"0.5","T":1700000000000,"t":1,"m":false,"R":false,"wt":"CONTRACT_PRICE","ot":"LIMIT","ps":"BOTH","cp":false,"pP":false,"rp":"0","V":"EXPIRE_TAKER","pm":"NONE","gtd":0}}
+      {"e":"ACCOUNT_UPDATE","E":1700000000000,"T":1700000000000,"a":{"B":[{"a":"USDT","wb":"999999.5","cw":"999999.5","bc":"0"}],"P":[{"s":"BTCUSDT","pa":"0.01","ep":"100000","cr":"0","up":"0","mt":"cross","iw":"0","ps":"BOTH"}],"m":"ORDER"}}
+      |}];
+    let%bind () =
+      call ~key:taker `DELETE port "/fapi/v1/allOpenOrders?symbol=BTCUSDT&timestamp=1"
+      |> ignore_body
+    in
+    let%bind () = receive incoming in
+    [%expect
+      {|
+      200 {"code":200,"msg":"The operation of cancel all open order is done."}
+      {"e":"ORDER_TRADE_UPDATE","E":1700000000000,"T":1700000000000,"o":{"s":"BTCUSDT","c":"sim-2","S":"BUY","o":"LIMIT","f":"GTC","q":"0.02","p":"100000","ap":"100000","sp":"0","x":"CANCELED","X":"CANCELED","i":2,"l":"0","z":"0.01","L":"0","T":1700000000000,"t":0,"m":false,"R":false,"wt":"CONTRACT_PRICE","ot":"LIMIT","ps":"BOTH","cp":false,"pP":false,"rp":"0","V":"EXPIRE_TAKER","pm":"NONE","gtd":0}}
+      |}];
+    let%bind () = call ~key:taker `DELETE port "/fapi/v1/listenKey" |> ignore_body in
+    let%bind () = call ~key:taker `PUT port "/fapi/v1/listenKey" |> ignore_body in
+    [%expect
+      {|
+      200 {}
+      400 {"code":-1125,"msg":"This listenKey does not exist."}
+      |}];
+    Pipe.close outgoing;
+    return ())
+;;
+
+let%expect_test "raw streams and ping frames" =
+  let config = { Server.Config.default with ping_interval = Time_ns.Span.of_int_ms 20 } in
+  with_server ~config (fun port ->
+    let%bind ws, incoming, outgoing = ws_connect port "/ws/btcusdt@aggTrade" in
+    [%expect {| HTTP/1.1 101 Switching Protocols |}];
+    let ping = Ivar.create () in
+    Bus.subscribe_permanently_exn (Websocket.frame_received ws) ~f:(fun opcode ->
+      match opcode with
+      | Ping -> Ivar.fill_if_empty ping ()
+      | _ -> ());
+    let%bind () = Ivar.read ping in
+    print_endline "ping";
+    [%expect {| ping |}];
+    let%bind () =
+      order
+        port
+        ~key:mm
+        ~side:"SELL"
+        ~type_:"LIMIT"
+        ~tif:"GTC"
+        ~price:"100000"
+        ~qty:"0.01"
+      >>= fun () -> order port ~key:taker ~side:"BUY" ~type_:"MARKET" ~qty:"0.01"
+    in
+    let%bind () = receive incoming in
+    [%expect
+      {|
+      200 {"orderId":1,"symbol":"BTCUSDT","clientOrderId":"sim-1","side":"SELL","positionSide":"BOTH","status":"NEW","type":"LIMIT","origType":"LIMIT","timeInForce":"GTC","price":"100000","origQty":"0.01","executedQty":"0","cumQty":"0","cumQuote":"0","avgPrice":"0","stopPrice":"0","reduceOnly":false,"closePosition":false,"priceProtect":false,"workingType":"CONTRACT_PRICE","priceMatch":"NONE","selfTradePreventionMode":"EXPIRE_TAKER","goodTillDate":0,"updateTime":1700000000000}
+      200 {"orderId":2,"symbol":"BTCUSDT","clientOrderId":"sim-2","side":"BUY","positionSide":"BOTH","status":"FILLED","type":"MARKET","origType":"MARKET","timeInForce":"GTC","price":"0","origQty":"0.01","executedQty":"0.01","cumQty":"0.01","cumQuote":"1000","avgPrice":"100000","stopPrice":"0","reduceOnly":false,"closePosition":false,"priceProtect":false,"workingType":"CONTRACT_PRICE","priceMatch":"NONE","selfTradePreventionMode":"EXPIRE_TAKER","goodTillDate":0,"updateTime":1700000000000}
+      {"e":"aggTrade","E":1700000000000,"s":"BTCUSDT","a":1,"p":"100000","q":"0.01","f":1,"l":1,"T":1700000000000,"m":false}
+      |}];
+    Pipe.close outgoing;
+    return ())
+;;
