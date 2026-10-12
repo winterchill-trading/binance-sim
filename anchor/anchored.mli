@@ -49,6 +49,9 @@ val start
   -> Spec.t
   -> t Or_error.t Deferred.t
 
+(** Stops the source; {!finished} becomes determined once the last item is applied. *)
+val stop : t -> unit Deferred.t
+
 val spec : t -> Spec.t
 val anchor : t -> Price_anchor.Anchor.t
 

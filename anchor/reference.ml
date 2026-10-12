@@ -52,6 +52,20 @@ let normalizer : Market_data.Venue.t -> Market_data.Normalizer.t Or_error.t = fu
   | venue -> unsupported venue "raw"
 ;;
 
+type t =
+  { source : Price_anchor.Source.t
+  ; close : unit -> unit Deferred.t
+  }
+
+let of_source source =
+  { source
+  ; close =
+      (fun () ->
+        Pipe.close_read source;
+        return ())
+  }
+;;
+
 let symbol (instrument : Market_data.Instrument.t) =
   Market_data.Symbol.to_string instrument.symbol
 ;;
@@ -64,7 +78,15 @@ let live ?(live_config = Binance_client.Config.Read_only.mainnet ()) instrument 
         live_config
         ~symbols:[ symbol instrument ]
         ~streams:[ Trades; L2; Funding ])
-    |> Deferred.Or_error.map ~f:Price_anchor.Source.of_feed
+    |> Deferred.Or_error.map ~f:(fun feed ->
+      let (module F : Market_data.Feed.S) = feed in
+      let source = Price_anchor.Source.of_feed feed in
+      { source
+      ; close =
+          (fun () ->
+            Pipe.close_read source;
+            F.close ())
+      })
   | venue -> return (unsupported venue "live")
 ;;
 
@@ -77,13 +99,14 @@ let open_ ?live_config (kind : Kind.t) instrument =
      | Ok normalizer ->
        return
          (Ok
-            (Price_anchor.Source.of_raw
-               ~dir
-               ~symbol:(symbol instrument)
-               ~from
-               ~to_
-               ~normalizer
-               ())))
+            (of_source
+               (Price_anchor.Source.of_raw
+                  ~dir
+                  ~symbol:(symbol instrument)
+                  ~from
+                  ~to_
+                  ~normalizer
+                  ()))))
   | Norm { dir; from; to_ } ->
     let day t = Time_ns.to_date t ~zone:utc in
     Price_anchor.Source.of_norm
@@ -91,4 +114,5 @@ let open_ ?live_config (kind : Kind.t) instrument =
       instrument
       ~from:(day from)
       ~to_:(day (Time_ns.sub to_ (Time_ns.Span.of_int_ns 1)))
+    |> Deferred.Or_error.map ~f:of_source
 ;;

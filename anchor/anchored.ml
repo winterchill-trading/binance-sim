@@ -113,11 +113,17 @@ type t =
   ; anchor : Anchor.t
   ; source_name : string
   ; finished : unit Deferred.t
+  ; close : unit -> unit Deferred.t
   }
 
 let spec t = t.spec
 let anchor t = t.anchor
 let finished t = t.finished
+
+let stop t =
+  let%bind () = t.close () in
+  t.finished
+;;
 
 let apply anchor : Source.Item.t -> unit = function
   | Event event -> Anchor.apply anchor event
@@ -145,9 +151,9 @@ let start ?live_config ?market_sim ?source server (config : Config.t) (spec : Sp
         [%message
           "anchored symbol is not listed" ~sim_symbol:(spec.sim_symbol : Symbol.t)]
   in
-  let%map source =
+  let%map { Reference.source; close } =
     match source with
-    | Some source -> return source
+    | Some source -> return (Reference.of_source source)
     | None -> Reference.open_ ?live_config config.source spec.reference
   in
   let reference = Market_data.Instrument.to_string spec.reference in
@@ -186,7 +192,7 @@ let start ?live_config ?market_sim ?source server (config : Config.t) (spec : Sp
       [%message
         "anchor source finished" reference ~stats:(Anchor.stats anchor : Anchor.Stats.t)]
   in
-  { spec; anchor; source_name = Reference.Kind.name config.source; finished }
+  { spec; anchor; source_name = Reference.Kind.name config.source; finished; close }
 ;;
 
 let status t =

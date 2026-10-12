@@ -32,6 +32,12 @@ val parse_time : [ `Start | `End ] -> string -> Time_ns.t Or_error.t
 (** The venue's raw frame decoder; only Binance is linked into this binary. *)
 val normalizer : Market_data.Venue.t -> Market_data.Normalizer.t Or_error.t
 
+type t =
+  { source : Price_anchor.Source.t
+  ; close : unit -> unit Deferred.t
+  (** stops the source: closes a live feed's connections, or the pipe of a recorded one *)
+  }
+
 (** Opens the source of [instrument]. [Live] subscribes to trades, L2 and funding through
     {!Binance_client.Live_feed} with [live_config] (default: mainnet, no keys); other
     venues' live feeds are not linked. *)
@@ -39,4 +45,7 @@ val open_
   :  ?live_config:Binance_client.Config.Read_only.t
   -> Kind.t
   -> Market_data.Instrument.t
-  -> Price_anchor.Source.t Or_error.t Deferred.t
+  -> t Or_error.t Deferred.t
+
+(** A source that {!t.close} closes by closing its pipe. *)
+val of_source : Price_anchor.Source.t -> t
