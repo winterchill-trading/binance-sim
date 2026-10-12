@@ -269,7 +269,7 @@ let%expect_test "order rejections and batch orders" =
       400 {"code":-2010,"msg":"Account has insufficient balance for requested action."}
       400 {"code":-5021,"msg":"Due to the order could not be filled immediately, the FOK order has been rejected. The order will not be recorded in the order history"}
       400 {"code":-1115,"msg":"Invalid timeInForce."}
-      400 {"code":-2020,"msg":"Unable to fill."}
+      200 {"orderId":2,"symbol":"BTCUSDT","clientOrderId":"sim-2","side":"BUY","positionSide":"BOTH","status":"EXPIRED","type":"LIMIT","origType":"LIMIT","timeInForce":"IOC","price":"100000","origQty":"0.01","executedQty":"0","cumQty":"0","cumQuote":"0","avgPrice":"0","stopPrice":"0","reduceOnly":false,"closePosition":false,"priceProtect":false,"workingType":"CONTRACT_PRICE","priceMatch":"NONE","selfTradePreventionMode":"EXPIRE_TAKER","goodTillDate":0,"updateTime":1700000000000}
       400 {"code":-1117,"msg":"Invalid side."}
       400 {"code":-1116,"msg":"Invalid orderType."}
       400 {"code":-1102,"msg":"Mandatory parameter 'price' was not sent, was empty/null, or malformed."}

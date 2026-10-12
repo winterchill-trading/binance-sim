@@ -106,8 +106,7 @@ curl -s -X POST -H 'X-MBX-APIKEY: alice' localhost:3300/fapi/v1/listenKey
 Errors are `{"code": ..., "msg": ...}` with Binance's codes and wording: `-1102` missing
 parameter, `-1111` precision, `-1115` time in force, `-1116` order type, `-1117` side,
 `-1121` symbol, `-1125` listen key, `-1130` invalid parameter, `-2010` insufficient
-margin or self-trade, `-2011` unknown order on cancel, `-2020` IOC or market order with
-nothing to match, `-2022` reduce-only, `-4003`/`-4005` quantity bounds, `-4014` tick
+margin or self-trade, `-2011` unknown order on cancel, `-2022` reduce-only, `-4003`/`-4005` quantity bounds, `-4014` tick
 size, `-4116` duplicate client order id, `-4164` min notional, `-5021` FOK, `-5022` GTX.
 
 ### Websocket
@@ -161,10 +160,9 @@ snapshot again then.
   modify/amend, leverage, margin type or order query endpoints.
 - **Responses** always carry the post-matching state (as with
   `newOrderRespType=RESULT`), including `avgPrice` and `cumQuote`.
-- **IOC/market orders without any fill** are rejected with `-2020 Unable to fill.`
-  instead of returning an `EXPIRED` order (the engine assigns no order id to them). With
-  a partial fill the response is `EXPIRED` with the filled quantity, and the user stream
-  sends `TRADE` events followed by `EXPIRED`.
+- **IOC/market orders with no fill** get an `EXPIRED` response with `executedQty` `0` and
+  a real order id, and the user stream sends nothing for them (they never rest). With a
+  partial fill the user stream sends `TRADE` events followed by `EXPIRED`.
 - **FOK** is checked against the book's depth up to the limit price, then sent as IOC.
 - **Self-trade prevention** is "expire taker": an order whose first match would be
   against the same account is rejected with `-2010`; if it already filled partly, the

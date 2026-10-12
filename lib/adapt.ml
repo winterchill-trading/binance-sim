@@ -510,9 +510,22 @@ let new_order t account (req : New_order.Request.t) =
          Ok
            (order_of_info t info ~order_id ~status ~executed ~cum_quote ~cum_qty:executed)
        in
-       (match Exchange.place ex account neutral with
-        | Resting { order_id; client_order_id = _ } -> respond order_id `Resting
-        | Filled { order_id; _ } -> respond order_id `Done
+       let order_id, status = Exchange.place_with_order_id ex account neutral in
+       (match status with
+        | Resting _ -> respond order_id `Resting
+        | Filled _ -> respond order_id `Done
+        | Rejected No_liquidity ->
+          (* An IOC or market order that fills nothing is EXPIRED, not rejected. It is not
+             kept: nothing rests and no later request can refer to it. *)
+          Ok
+            (order_of_info
+               t
+               info
+               ~order_id
+               ~status:Expired
+               ~executed:Size.zero
+               ~cum_quote:Usd.zero
+               ~cum_qty:Size.zero)
         | Rejected reason -> Error (api_error_of_reject reason)))
 ;;
 
