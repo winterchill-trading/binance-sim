@@ -1,13 +1,16 @@
 ; The main module is [main] rather than [binance_sim] so that it does not clash with
-; the [binance_sim] library's wrapper module.
+; the [binance_sim] library's wrapper module. The binary belongs to the
+; binance-sim-anchor package: it links binance-client, whose tests depend on binance-sim.
 
 (executable
  (name main)
  (public_name binance-sim)
+ (package binance-sim-anchor)
  (libraries
   async
   binance-protocol
   binance-sim
+  binance-sim-anchor
   core
   core_unix.command_unix
   exchange-core
