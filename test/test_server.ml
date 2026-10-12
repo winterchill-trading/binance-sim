@@ -516,3 +516,30 @@ let%expect_test "raw streams and ping frames" =
     Pipe.close outgoing;
     return ())
 ;;
+
+let%expect_test "step hooks see the stepped clock; extra GET routes" =
+  Log.Global.set_output [];
+  let server = Server.create ~now (Adapt.create ()) in
+  Server.on_step server (fun ~now -> printf "hook 1 at %d\n" now);
+  Server.on_step server (fun ~now:_ -> print_endline "hook 2");
+  let steps = ref 0 in
+  Server.add_get_route server ~path:"/sim/status" (fun () ->
+    `Assoc [ "steps", `Int !steps ]);
+  Server.on_step server (fun ~now:_ -> incr steps);
+  let%bind http = Server.listen server ~port:0 in
+  let port = Server.port http in
+  let%bind () = get port "/sim/status" |> ignore_body in
+  [%expect {|
+    hook 1 at 1700000000000000000
+    hook 2
+    200 {"steps":1}
+    |}];
+  let%bind () = get port "/sim/other" |> ignore_body in
+  [%expect
+    {|
+    hook 1 at 1700000000000000000
+    hook 2
+    404 {"code":-5000,"msg":"Path /sim/other, Method GET is invalid"}
+    |}];
+  Cohttp_async.Server.close http
+;;
