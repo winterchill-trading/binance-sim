@@ -105,3 +105,7 @@ val start_periodic : t -> unit
 val run_market_sim : t -> Exchange_core_engine.Market_sim.t -> unit
 
 val num_ws_connections : t -> int
+
+(** Determined once every websocket connection's outgoing queue is empty (or closed): lets
+    a producer run as fast as the slowest client reads. *)
+val pushback : t -> unit Deferred.t

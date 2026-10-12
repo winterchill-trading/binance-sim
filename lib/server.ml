@@ -698,6 +698,12 @@ let start_periodic t =
   Clock_ns.every t.config.step_interval (fun () -> mutate t ~f:ignore)
 ;;
 
+let pushback t =
+  Hashtbl.data t.conns
+  |> List.map ~f:(fun (conn : Conn.t) -> Pipe.pushback conn.send)
+  |> Deferred.all_unit
+;;
+
 let run_market_sim t sim =
   Clock_ns.every (Market_sim.config sim).tick_interval (fun () ->
     mutate t ~f:(fun _ -> Market_sim.tick sim))

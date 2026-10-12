@@ -543,3 +543,11 @@ let%expect_test "step hooks see the stepped clock; extra GET routes" =
     |}];
   Cohttp_async.Server.close http
 ;;
+
+let%expect_test "pushback is immediate without websocket clients" =
+  Log.Global.set_output [];
+  let server = Server.create ~now (Adapt.create ()) in
+  print_s [%sexp (Deferred.is_determined (Server.pushback server) : bool)];
+  [%expect {| true |}];
+  return ()
+;;
