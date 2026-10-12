@@ -50,3 +50,37 @@ let%expect_test "-anchor-from and -anchor-to values" =
     error
     |}]
 ;;
+
+let%expect_test "the server clock follows the replay speed" =
+  let wall () = Time_ns.to_int_ns_since_epoch (Time_ns.now ()) in
+  let raw : Reference.Kind.t =
+    Raw { dir = "."; from = Time_ns.epoch; to_ = Time_ns.max_value_representable }
+  in
+  let advance (config : Anchored.Config.t) =
+    let clock = Anchored.Config.server_clock config in
+    let t0 = clock () in
+    let w0 = wall () in
+    while wall () - w0 < 50_000_000 do
+      ()
+    done;
+    Float.of_int (clock () - t0) /. Float.of_int (wall () - w0)
+  in
+  let print what ratio =
+    printf "%s: %.1f\n" what (Float.round_decimal ratio ~decimal_digits:1)
+  in
+  print "live" (advance Anchored.Config.default);
+  print "recorded, speed 1" (advance { Anchored.Config.default with source = raw });
+  print
+    "recorded, speed 0.5"
+    (advance { Anchored.Config.default with source = raw; speed = 0.5 });
+  print
+    "recorded, speed 0"
+    (advance { Anchored.Config.default with source = raw; speed = 0. });
+  [%expect
+    {|
+    live: 1.0
+    recorded, speed 1: 1.0
+    recorded, speed 0.5: 0.5
+    recorded, speed 0: 0.0
+    |}]
+;;
