@@ -47,6 +47,11 @@ module Spec : sig
   val instrument : t -> Exchange_core.Instrument.t
 end
 
+(** Starting reference prices for {!Exchange_core_engine.Market_sim} on the default
+    universe: BTCUSDT 100000, ETHUSDT 3500, SOLUSDT 150 (its defaults are keyed by
+    Hyperliquid coin names). *)
+val initial_prices : (Symbol.t * Price.t) list
+
 (** Binance's base (VIP 0) USD-M fees: taker 5 bps, maker 2 bps. *)
 val fees : Exchange_core.Fee_schedule.t
 

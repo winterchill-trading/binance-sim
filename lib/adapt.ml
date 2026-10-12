@@ -122,6 +122,12 @@ module Spec = struct
 end
 
 let fees = Spec.fees
+
+let initial_prices =
+  [ "BTCUSDT", 100_000; "ETHUSDT", 3_500; "SOLUSDT", 150 ]
+  |> List.map ~f:(fun (s, px) -> Symbol.of_string s, Price.of_int px)
+;;
+
 let funding_interval_ns = Time_ns.Span.to_int_ns (Time_ns.Span.of_hr 8.)
 
 let config ?(universe = Spec.default_universe) () =

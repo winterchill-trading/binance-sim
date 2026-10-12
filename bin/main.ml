@@ -63,9 +63,6 @@ let command =
        Server.start_periodic server;
        if noise_traders > 0
        then (
-         let btc = Symbol.of_string "BTCUSDT"
-         and eth = Symbol.of_string "ETHUSDT"
-         and sol = Symbol.of_string "SOLUSDT" in
          let sim =
            Market_sim.create
              { Market_sim.Config.default with
@@ -73,11 +70,7 @@ let command =
              ; vol_bps
              ; noise_traders
              ; symbols = List.map (Option.value symbols ~default:[]) ~f:Symbol.of_string
-             ; initial_prices =
-                 [ btc, Price.of_int 100_000
-                 ; eth, Price.of_int 3_500
-                 ; sol, Price.of_int 150
-                 ]
+             ; initial_prices = Adapt.initial_prices
              }
              (Adapt.exchange adapt)
          in
