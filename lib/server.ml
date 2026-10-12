@@ -75,6 +75,8 @@ type t =
   ; key_of_account : string Account_id.Table.t
   ; account_of_key : Account_id.t String.Table.t
   ; mutable next_key : int
+  ; mutable step_hooks : (now:int -> unit) list (** in registration order *)
+  ; extra_routes : (unit -> Yojson.Safe.t) String.Table.t (** [GET] path to body *)
   }
 
 let wall_clock () = Time_ns.now () |> Time_ns.to_int_ns_since_epoch
@@ -90,7 +92,17 @@ let last_update_id t symbol =
 
 let step_clock t =
   let now = t.now () in
-  if now > Exchange.now (exchange t) then Exchange.step (exchange t) ~now
+  if now > Exchange.now (exchange t) then Exchange.step (exchange t) ~now;
+  let now = Exchange.now (exchange t) in
+  List.iter t.step_hooks ~f:(fun f -> f ~now)
+;;
+
+let on_step t f = t.step_hooks <- t.step_hooks @ [ f ]
+
+let add_get_route t ~path f =
+  match Hashtbl.add t.extra_routes ~key:path ~data:f with
+  | `Ok -> ()
+  | `Duplicate -> raise_s [%message "route already registered" (path : string)]
 ;;
 
 let create ?(config = Config.default) ?(now = wall_clock) adapt =
@@ -107,6 +119,8 @@ let create ?(config = Config.default) ?(now = wall_clock) adapt =
     ; key_of_account = Account_id.Table.create ()
     ; account_of_key = String.Table.create ()
     ; next_key = 0
+    ; step_hooks = []
+    ; extra_routes = String.Table.create ()
     }
   in
   step_clock t;
@@ -612,6 +626,8 @@ let route t req (meth : Cohttp.Code.meth) path params : reply =
     with_api_key req ~f:(fun account ->
       close_listen_key t account;
       Ok (`Assoc []))
+  | `GET, path when Hashtbl.mem t.extra_routes path ->
+    Ok ((Hashtbl.find_exn t.extra_routes path) ())
   | _, path ->
     Error
       ( `Not_found

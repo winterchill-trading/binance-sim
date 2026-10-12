@@ -74,6 +74,16 @@ val ensure_account : t -> Exchange_core.Account.t -> unit
     events it produced (book sequence numbers, websocket streams, user data streams). *)
 val mutate : t -> f:(Adapt.t -> 'a) -> 'a
 
+(** [f ~now] runs on the scheduler thread each time the exchange clock is stepped (before
+    every request, on the periodic step and in {!mutate}), after the step, with [now] the
+    exchange time in nanoseconds. Hooks run in registration order. Used to drive a price
+    anchor ([Price_anchor.Anchor.step]) from the simulator's own clock. *)
+val on_step : t -> (now:int -> unit) -> unit
+
+(** Serves [GET path] with [f ()] as a JSON body (status 200), e.g. a status page. Raises
+    if [path] is already registered. Binance paths take precedence. *)
+val add_get_route : t -> path:string -> (unit -> Yojson.Safe.t) -> unit
+
 (** The book sequence number reported as [lastUpdateId]. *)
 val last_update_id : t -> Symbol.t -> int
 
