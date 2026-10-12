@@ -1,0 +1,22 @@
+(library
+ (name binance_sim_anchor_test)
+ (package binance-sim-anchor)
+ (inline_tests
+  (flags
+   (:standard -source-tree-root .))
+  (deps
+   (source_tree fixtures)))
+ (libraries
+  async
+  binance-client
+  binance-protocol
+  binance-sim
+  binance-sim-anchor
+  core
+  exchange-core
+  exchange-core-engine
+  market-data
+  price-anchor
+  yojson)
+ (preprocess
+  (pps ppx_jane)))
