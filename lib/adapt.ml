@@ -817,7 +817,10 @@ let premium_index t symbol =
     ; mark_price = mark
     ; index_price = mark
     ; estimated_settle_price = Some mark
-    ; last_funding_rate = Decimal.of_float (Exchange.funding_rate t.exchange spec.symbol)
+    ; last_funding_rate =
+        (* The engine keeps funding rates as floats, so there is no decimal text to parse. *)
+        (Decimal.of_float [@alert "-lossy"])
+          (Exchange.funding_rate t.exchange spec.symbol)
     ; interest_rate = Some (Decimal.of_string "0.0001")
     ; next_funding_time = next_funding_time t
     ; time = now_ms t
