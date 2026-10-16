@@ -34,6 +34,11 @@ dune exec binance-sim -- -port 3300
 | `-anchor-raw DIR`, `-anchor-norm DIR` | live | recorded source: raw minute files or event logs |
 | `-anchor-from T`, `-anchor-to T` | | recorded range: ISO 8601 time with zone, or a UTC date (a whole day) |
 | `-anchor-speed` | 1 | recorded pace: 1 real time, 0 as fast as websocket clients read |
+| `-collar-bps N`, `-collar-ticks N` | off | price collar band on every symbol, see [Price collar and halts](#price-collar-and-halts) |
+| `-collar-reference` | `last`, `mark` with `-anchor` | `last`, `mid` or `mark`: the price the band is centred on |
+| `-collar-action` | `reject` | `reject` or `reprice` an aggressive limit order beyond the band |
+| `-halt-levels SPEC` | off | circuit-breaker levels `PERCENT:DURATION,...`, e.g. `7:15m,13:15m,20:reopen` |
+| `-halt-scope` | `market` | `market` (a trigger halts every symbol) or `symbol` (only the one that moved) |
 
 Logs go to stderr: fills and liquidations at `info`; every event, request and websocket
 request at `debug`.
@@ -231,6 +236,51 @@ time     state  reference   sim bid / ask           maker bid / ask         repl
 The reference price is the venue's mark (from markPrice@1s), so it can differ from the
 book's mid by a few ticks.
 
+## Price collar and halts
+
+The engine's price collar and halt rule (`Price_collar`, `Halt_rule` in
+[exchange-core](https://github.com/winterchill-trading/exchange-core)) are off unless their
+flags are given; without them the simulator behaves as before.
+
+```sh
+# Aggressive orders more than 0.5% from the last trade are refused; moves of 7% and 13%
+# from the session reference halt every symbol for 15 minutes, 20% until reopened.
+dune exec binance-sim -- -collar-bps 50 -halt-levels 7:15m,13:15m,20:reopen
+```
+
+- **Collar.** A limit order that would trade beyond the band around the reference price
+  (last trade by default, the mark when anchored) is rejected, or with
+  `-collar-action reprice` stops at the band. Market orders are never rejected: their
+  protection price is clamped to the band. Post-only orders are not checked. With a bps
+  band, `PERCENT_PRICE` in `exchangeInfo` shows it (`-collar-bps 50`: `multiplierUp`
+  1.0050, `multiplierDown` 0.9950); otherwise it stays 1.05/0.95.
+- **Halts.** Each symbol's mark is compared with its session reference (the first mark
+  seen). A move past a level halts trading for the level's duration (`15m`, `90s`, ...) or
+  until `POST /sim/reopen` (`reopen`). While halted, orders that would trade are refused;
+  passive orders rest and cancels work. Each level triggers once.
+- **`GET /sim/guard`** answers the collar per symbol (reference, band, action, current
+  reference price and bounds), the halt rule with the session references, the halted
+  symbols (`{"state": "halted", "until": ms}`, `untilReopen`, `reopenPending`), the
+  counters (`collarRejected`, `collarRepriced`, `collarUnreferenced`, `haltRejected`,
+  `halts`, `reopens`) and the last 50 guard events. Every guard event is also logged at
+  `info`.
+- **`POST /sim/reopen[?symbol=BTCUSDT]`** lifts the halt of one symbol, or of all of them,
+  and answers the same status.
+
+Rejections use Binance's errors:
+
+| Engine outcome | Binance error |
+| --- | --- |
+| collar, buy beyond the upper bound | `-4016 Limit price can't be higher than <bound>.` (PERCENT_PRICE) |
+| collar, sell beyond the lower bound | `-4024 Limit price can't be lower than <bound>.` (PERCENT_PRICE) |
+| halted | `-2010 Trading is halted.` (sim-chosen: Binance publishes no halt code for USD-M; `-2010` is its generic order rejection) |
+
+The collar is told apart from an off-tick price (both `Invalid_price` in the engine) by the
+engine's guard counter; an off-tick price stays `-4014`.
+
+`scripts/collar-e2e.sh [SECONDS]` runs `market-maker` against a collared simulator, then
+checks that an order 2% through the ask gets `-4016`.
+
 ## Differences from Binance
 
 - **Auth**: no signature or `recvWindow` checks, no rate limits, no IP or key bans.
@@ -254,7 +304,9 @@ book's mid by a few ticks.
   `MIN_NOTIONAL` for them is checked at the mark price (skipped when there is none).
 - **Reduce-only** orders are clipped to the position size, and reported with the clipped
   `origQty`.
-- **`PRICE_FILTER` min/max and `PERCENT_PRICE`** are published but not enforced.
+- **`PRICE_FILTER` min/max** are published but not enforced. `PERCENT_PRICE` is enforced
+  only with a collar (`-collar-bps`), on the aggressor's side, around one reference price
+  (Binance checks the limit against the mark price on both sides).
 - **Prices**: the index price equals the mark price; the mark is the engine's (the
   anchor's reference price on anchored symbols, the market sim reference price when it
   runs, else last trade, else mid, else `0`). Funding uses the configured rate (the
@@ -304,6 +356,7 @@ the [exchange-core README](https://github.com/winterchill-trading/exchange-core)
 | --- | --- |
 | `Adapt` | Binance view of the engine: universe and trading rules, order validation with Binance error codes, order objects, `User_trade`, `Account` (v2), `Position_risk`, `Depth`, `Book_ticker`, `Premium_index`, `Exchange_info`, stream payloads, and the per-order state behind `ORDER_TRADE_UPDATE` |
 | `Params` | Query-string and form parameters to `New_order.Request`, `Cancel_order.Request` and batch items, with Binance's parameter errors |
+| `Guard` | the `-collar-*` and `-halt-*` flags, applying them to the engine, and the `GET /sim/guard` status |
 | `Server` | cohttp-async server for `/fapi` and the `/ws` and `/stream` websockets (async_websocket); owns the engine, depth sequencing, listen keys and the market simulation timer; clock step hooks, extra `GET` routes and websocket `pushback` for the anchor |
 
 `Binance_sim_anchor` (package `binance-sim-anchor`):
@@ -325,11 +378,14 @@ websocket subscribers right after it.
 reduce-only, self-trade prevention, funding), a seeded market simulation on the Binance
 universe, and the HTTP and websocket server on a free port with a fixed clock (market
 data, orders, cancels, account views, rejections, batch orders, stream subscriptions with
-depth sequencing, the user data stream and ping frames).
+depth sequencing, the user data stream and ping frames). `test_guard.ml` covers the
+collar and halt flags, the `-4016`/`-4024`/`-2010` errors, `PERCENT_PRICE`, `/sim/guard`,
+`/sim/reopen`, and the input journal replaying the guard log.
 
 `anchor/test` checks the anchor flags and the server clock per replay speed, a live anchor
 to a second binance-sim on a local port (the reference book rests in the anchored book, a
 reference trade fills a client order it trades through, the journal replays the run), and
 a recorded Binance minute (`anchor/test/fixtures`, copied from binance-client's fixtures
 as raw minute files): two trade-replay fills of a client order, a journal replay that
-matches, and the same run from event logs rebuilt from those files.
+matches, the same run from event logs rebuilt from those files, and the minute with a
+2 bps collar on the mark and a tight halt rule, whose guard log the journal replays.
