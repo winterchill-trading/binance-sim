@@ -211,6 +211,9 @@ let min_notional_error min =
 let api_error_of_reject (reason : Neutral.Reject_reason.t) =
   match reason with
   | Unknown_symbol -> error Bad_symbol "Invalid symbol."
+  (* Binance publishes no code for a halted symbol; -2010 is its generic order rejection. *)
+  | Unsupported msg when String.equal msg Guard.halted_reason ->
+    error New_order_rejected "Trading is halted."
   | Unsupported msg -> error Invalid_parameter msg
   | Invalid_size -> error Bad_precision precision_msg
   | Invalid_price ->
@@ -231,6 +234,28 @@ let api_error_of_reject (reason : Neutral.Reject_reason.t) =
       "Due to the order could not be executed as maker, the Post Only order will be \
        rejected. The order will not be recorded in the order history"
   | Order_not_found -> error Cancel_rejected "Unknown order sent."
+;;
+
+(* Binance's PERCENT_PRICE errors for a limit order beyond the band, with the bound the
+   order met. *)
+let collar_error ex ~symbol ~side =
+  let bound =
+    match
+      ( Exchange.collar ex symbol
+      , Exchange.collar_reference ex symbol
+      , Exchange.instrument ex symbol )
+    with
+    | Some config, Some reference, Some instrument ->
+      Price.to_string
+        (Exchange_core_engine.Price_collar.bound config instrument ~reference ~side)
+    | _ -> "the band"
+  in
+  match (side : Side.t) with
+  | Buy ->
+    error
+      Price_higher_than_multiplier_up
+      (sprintf "Limit price can't be higher than %s." bound)
+  | Sell -> error (Other (-4024)) (sprintf "Limit price can't be lower than %s." bound)
 ;;
 
 let mandatory name =
@@ -510,6 +535,8 @@ let new_order t account (req : New_order.Request.t) =
          Ok
            (order_of_info t info ~order_id ~status ~executed ~cum_quote ~cum_qty:executed)
        in
+       let collar_rejected () = (Exchange.guard_stats ex).collar_rejected in
+       let collar_rejected_before = collar_rejected () in
        let order_id, status = Exchange.place_with_order_id ex account neutral in
        (match status with
         | Resting _ -> respond order_id `Resting
@@ -526,6 +553,10 @@ let new_order t account (req : New_order.Request.t) =
                ~executed:Size.zero
                ~cum_quote:Usd.zero
                ~cum_qty:Size.zero)
+        | Rejected Invalid_price when collar_rejected () > collar_rejected_before ->
+          (* The engine reports a collar rejection as [Invalid_price]; the counter tells
+             it from an off-tick price, without draining the guard log. *)
+          Error (collar_error ex ~symbol:neutral.symbol ~side:neutral.side)
         | Rejected reason -> Error (api_error_of_reject reason)))
 ;;
 

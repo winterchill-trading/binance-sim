@@ -84,7 +84,12 @@ val now_ms : t -> Timestamp_ms.t
     The response is the order's state right after matching (as with
     [newOrderRespType=RESULT]): [NEW], [PARTIALLY_FILLED], [FILLED] or, for an IOC/FOK/
     market remainder, [EXPIRED], with [avgPrice] and [cumQuote]. Rejections are
-    {!Api_error.t}s and are recorded in the engine's event log. *)
+    {!Api_error.t}s and are recorded in the engine's event log.
+
+    With a price collar ({!Guard}), a buy limit beyond the band is
+    [-4016 Limit price can't be higher than <bound>.] and a sell
+    [-4024 Limit price can't be lower than <bound>.], as Binance's PERCENT_PRICE filter
+    reports them. *)
 val new_order
   :  t
   -> Account_id.t
@@ -124,7 +129,10 @@ val user_trades
 (** The Binance error for an engine rejection: [-1121] unknown symbol, [-1111] invalid
     size, [-4014] off-tick price, [-4116] duplicate client order id, [-2022] reduce-only,
     [-4164] min notional, [-2010] insufficient margin, [-2020] IOC/market without
-    liquidity, [-2010] self-trade, [-5022] GTX would match, [-2011] unknown order. *)
+    liquidity, [-2010] self-trade, [-5022] GTX would match, [-2011] unknown order,
+    [-2010 Trading is halted.] during a halt ({!Guard}). A collar rejection is not told
+    apart here (the engine reports it as [Invalid_price]); {!new_order} maps it to
+    [-4016]/[-4024]. *)
 val api_error_of_reject : Exchange_core.Reject_reason.t -> Api_error.t
 
 val error : Api_error.Code.t -> string -> Api_error.t
