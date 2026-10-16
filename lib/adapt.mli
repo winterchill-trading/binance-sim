@@ -165,6 +165,8 @@ val book_ticker : t -> Symbol.t -> Book_ticker.t option
     8-hour boundary (the engine's [funding_rate]) and that boundary. *)
 val premium_index : t -> Symbol.t -> Premium_index.t option
 
+(** Every symbol's rules. [PERCENT_PRICE] is 1.05/0.95 unless the symbol has a
+    basis-point collar ({!Guard}), whose band it then shows (50 bps: 1.0050/0.9950). *)
 val exchange_info : t -> Exchange_info.t
 
 (** {2 Streams} *)

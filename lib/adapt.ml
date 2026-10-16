@@ -858,7 +858,23 @@ let premium_index t symbol =
     })
 ;;
 
-let symbol_info (spec : Spec.t) : Exchange_info.Symbol_info.t =
+(* PERCENT_PRICE advertises a basis-point collar as its multipliers (Binance's own default
+   band of 5% otherwise; a tick collar has no multiplier form). *)
+let percent_price ex symbol : Exchange_info.Filter.t =
+  let multipliers =
+    match Exchange.collar ex symbol with
+    | Some { band = Bps bps; _ } ->
+      let m x = Decimal.of_string (sprintf "%.4f" x) in
+      let r = Float.of_int bps /. 10_000. in
+      m (1. +. r), m (Float.max 0. (1. -. r))
+    | Some { band = Ticks _; _ } | None ->
+      Decimal.of_string "1.05", Decimal.of_string "0.95"
+  in
+  let multiplier_up, multiplier_down = multipliers in
+  Percent_price { multiplier_up; multiplier_down; multiplier_decimal = 4 }
+;;
+
+let symbol_info ex (spec : Spec.t) : Exchange_info.Symbol_info.t =
   { symbol = spec.symbol
   ; pair = Symbol.to_string spec.symbol
   ; contract_type = "PERPETUAL"
@@ -893,11 +909,7 @@ let symbol_info (spec : Spec.t) : Exchange_info.Symbol_info.t =
       ; Max_num_orders { limit = 200 }
       ; Max_num_algo_orders { limit = 10 }
       ; Min_notional { notional = spec.min_notional }
-      ; Percent_price
-          { multiplier_up = Decimal.of_string "1.05"
-          ; multiplier_down = Decimal.of_string "0.95"
-          ; multiplier_decimal = 4
-          }
+      ; percent_price ex spec.symbol
       ]
   ; order_types = [ Limit; Market ]
   ; time_in_force = [ Gtc; Ioc; Fok; Gtx ]
@@ -916,7 +928,7 @@ let exchange_info t : Exchange_info.t =
       ; rate_limit "ORDERS" "SECOND" 10 300
       ]
   ; assets = [ { asset = usdt; margin_available = true; auto_asset_exchange = None } ]
-  ; symbols = List.map t.universe ~f:symbol_info
+  ; symbols = List.map t.universe ~f:(symbol_info t.exchange)
   }
 ;;
 
