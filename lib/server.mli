@@ -9,7 +9,10 @@
     - signed: [POST]/[DELETE /fapi/v1/order], [POST /fapi/v1/batchOrders],
       [DELETE /fapi/v1/allOpenOrders], [GET /fapi/v1/openOrders], [/fapi/v1/userTrades],
       [/fapi/v2/account], [/fapi/v2/positionRisk];
-    - user stream: [POST]/[PUT]/[DELETE /fapi/v1/listenKey].
+    - user stream: [POST]/[PUT]/[DELETE /fapi/v1/listenKey];
+    - simulator only: [GET /sim/guard] (the price collar and halt status, {!Guard.status},
+      with the last 50 guard events) and [POST /sim/reopen] (lifts the halt of the
+      optional [symbol], else of every halted symbol, and answers the same status).
 
     Authentication: the [X-MBX-APIKEY] header names the account; any key is accepted and
     credited [Config.initial_balance] on first use. Signatures are not verified, but
@@ -83,6 +86,10 @@ val on_step : t -> (now:int -> unit) -> unit
 (** Serves [GET path] with [f ()] as a JSON body (status 200), e.g. a status page. Raises
     if [path] is already registered. Binance paths take precedence. *)
 val add_get_route : t -> path:string -> (unit -> Yojson.Safe.t) -> unit
+
+(** The last 50 guard events ({!Exchange_core_engine.Guard_event}), oldest first. The
+    server drains the engine's guard log on every {!mutate} and logs each event. *)
+val guard_events : t -> Exchange_core_engine.Guard_event.t list
 
 (** The book sequence number reported as [lastUpdateId]. *)
 val last_update_id : t -> Symbol.t -> int

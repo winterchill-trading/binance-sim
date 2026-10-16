@@ -5,6 +5,7 @@ module Exchange = Exchange_core_engine.Exchange
 module Event = Exchange_core_engine.Event
 module Market_sim = Exchange_core_engine.Market_sim
 module Account_id = Exchange_core.Account
+module Guard_event = Exchange_core_engine.Guard_event
 
 module Config = struct
   type t =
@@ -77,6 +78,7 @@ type t =
   ; mutable next_key : int
   ; mutable step_hooks : (now:int -> unit) list (** in registration order *)
   ; extra_routes : (unit -> Yojson.Safe.t) String.Table.t (** [GET] path to body *)
+  ; guard_events : Guard_event.t Queue.t (** the last [max_guard_events], oldest first *)
   }
 
 let wall_clock () = Time_ns.now () |> Time_ns.to_int_ns_since_epoch
@@ -121,6 +123,7 @@ let create ?(config = Config.default) ?(now = wall_clock) adapt =
     ; next_key = 0
     ; step_hooks = []
     ; extra_routes = String.Table.create ()
+    ; guard_events = Queue.create ()
     }
   in
   step_clock t;
@@ -283,7 +286,24 @@ let send_user_event t account event =
       if Set.mem conn.listen_keys key then send conn ~stream:key (Lazy.force payload))
 ;;
 
+let max_guard_events = 50
+
+(* The engine keeps guard events until drained; keep the last few for [GET /sim/guard]. *)
+let drain_guard_events t =
+  List.iter
+    (Exchange.drain_guard_events (exchange t))
+    ~f:(fun e ->
+      Log.Global.info_s [%sexp "guard", (e : Guard_event.t)];
+      Queue.enqueue t.guard_events e;
+      if Queue.length t.guard_events > max_guard_events
+      then ignore (Queue.dequeue_exn t.guard_events : Guard_event.t))
+;;
+
+let guard_events t = Queue.to_list t.guard_events
+let guard_status t = Guard.status ~recent:(guard_events t) (exchange t)
+
 let publish t =
+  drain_guard_events t;
   let events = Exchange.drain_events (exchange t) in
   if not (List.is_empty events)
   then (
@@ -626,6 +646,17 @@ let route t req (meth : Cohttp.Code.meth) path params : reply =
     with_api_key req ~f:(fun account ->
       close_listen_key t account;
       Ok (`Assoc []))
+  | `GET, "/sim/guard" -> Ok (guard_status t)
+  | `POST, "/sim/reopen" ->
+    in_400
+      (let%map symbol =
+         match Params.symbol_opt params with
+         | None -> Ok None
+         | Some s -> known_symbol t s |> Result.map ~f:Option.some
+       in
+       Exchange.reopen ?symbol (exchange t);
+       drain_guard_events t;
+       guard_status t)
   | `GET, path when Hashtbl.mem t.extra_routes path ->
     Ok ((Hashtbl.find_exn t.extra_routes path) ())
   | _, path ->
