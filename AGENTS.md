@@ -10,11 +10,12 @@ such as `binance-client` run against it in tests and in local development.
 
 | Path | Holds |
 | --- | --- |
-| `lib/` | Library `binance_sim`: `Adapt` (rules and order objects), `Params`, `Server` (see `lib/AGENTS.md`) |
+| `lib/` | Library `binance_sim`: `Adapt` (rules and order objects), `Params`, `Guard` (collar and halt flags and status), `Server` (see `lib/AGENTS.md`) |
 | `anchor/` | Package `binance-sim-anchor`: the `-anchor` flags, reference sources and anchored state (see `anchor/AGENTS.md`) |
 | `bin/` | `binance-sim` executable, default port 3300 (see `bin/AGENTS.md`) |
 | `test/` | Expect tests of order lifecycles, HTTP and websocket server tests (see `test/AGENTS.md`) |
-| `scripts/` | `anchor-demo.sh`: a short anchored run (see `scripts/AGENTS.md`) |
+| `scripts/` | `anchor-demo.sh`: a short anchored run; `collar-e2e.sh`: market-maker against a collared simulator (see `scripts/AGENTS.md`) |
+| `CHANGES.md` | Changelog; add an Unreleased line with each user-visible change |
 | `.github/` | CI workflow (see `.github/AGENTS.md`) |
 | `binance-sim.opam`, `binance-sim-anchor.opam`, `dune-project` | Two opam packages, generated from `dune-project` |
 
@@ -86,6 +87,11 @@ reusable workflow. To check a run: `gh run list --limit 1`, then at most one
 - Per-connection ping timers stop on close: `Clock_ns.every ~start ~stop:(Pipe.closed w)`.
 - The simulator does not check signatures, rate limits or ban state. Do not write tests that
   rely on them failing.
+- The engine reports a collar rejection as `Invalid_price`, like an off-tick price. `Adapt`
+  tells them apart by the `collar_rejected` guard counter around the place call; never
+  drain the guard log there, the server owns that drain (`/sim/guard` reads it).
+- New engine guard events or rejection kinds belong in the guard log, not new `Event.t`
+  constructors: this simulator matches every event and pins exchange-core at `main`.
 
 ## Where to read more
 
