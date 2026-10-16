@@ -47,6 +47,7 @@ let command =
             binance:BTCUSDT=BTCUSDT (repeatable; live unless -anchor-raw or \
             -anchor-norm)"
      and anchor_config = Binance_sim_anchor.Anchored.Config.param
+     and guard = Guard.Config.param
      and log_level =
        flag
          "-log-level"
@@ -57,6 +58,10 @@ let command =
        Log.Global.set_output [ Log.Output.stderr () ];
        Log.Global.set_level log_level;
        let adapt = Adapt.create () in
+       let guard = guard ~anchored:(not (List.is_empty anchors)) |> ok_exn in
+       Guard.apply guard (Adapt.exchange adapt) |> ok_exn;
+       if not ([%equal: Guard.Config.t] guard Guard.Config.off)
+       then Log.Global.info_s [%message "guard" (guard : Guard.Config.t)];
        let server =
          Server.create
            ~now:(Binance_sim_anchor.Anchored.Config.server_clock anchor_config)
